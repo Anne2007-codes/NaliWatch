@@ -30,6 +30,13 @@ def healthz():
     return {"ok": True}
 
 
-_frontend = Path(__file__).resolve().parents[3] / "frontend"
-if _frontend.is_dir():
+# Find the frontend folder by walking up the directory tree.
+# Works on the laptop (NaliWatch/frontend) and in Docker (no frontend -> skipped).
+_frontend = None
+for _p in Path(__file__).resolve().parents:
+    if (_p / "frontend").is_dir():
+        _frontend = _p / "frontend"
+        break
+
+if _frontend is not None:
     app.mount("/", StaticFiles(directory=str(_frontend), html=True), name="frontend")
