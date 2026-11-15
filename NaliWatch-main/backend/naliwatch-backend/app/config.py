@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     otp_ttl_seconds: int = 300
     otp_dev_echo: bool = False
 
+    # AI provider for report triage: auto | gemini | anthropic  (auto = whichever key is set, Gemini first)
+    ai_provider: str = "auto"
+    # Gemini (free tier works)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
     # Claude
     anthropic_api_key: str = ""
     claude_model: str = "claude-sonnet-5-5"

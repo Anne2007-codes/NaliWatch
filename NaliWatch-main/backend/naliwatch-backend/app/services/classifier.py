@@ -1,6 +1,7 @@
-"""Report classifier: Claude vision + forced structured output, with a cost cap and a safe fallback."""
+"""Report classifier: Gemini or Claude vision + structured output, with a cost cap and a safe fallback."""
 import base64
 import io
+import json
 import logging
 from typing import Literal
 
@@ -72,26 +73,72 @@ def _media_type(photo: bytes) -> str:
     return {"jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(fmt, "image/jpeg")
 
 
-def classify(photo: bytes | None, text: str | None) -> Classification:
-    if not settings.anthropic_api_key:
-        return fallback(text, "AI not configured")
-    if not kv.daily_counter_ok("ai_calls", settings.ai_daily_call_cap):
-        return fallback(text, "daily AI cap reached")
+def active_provider() -> str | None:
+    """Which AI backend will be used, or None when no key is configured."""
+    p = settings.ai_provider.lower()
+    if p == "gemini":
+        return "gemini" if settings.gemini_api_key else None
+    if p == "anthropic":
+        return "anthropic" if settings.anthropic_api_key else None
+    if settings.gemini_api_key:
+        return "gemini"
+    return "anthropic" if settings.anthropic_api_key else None
+
+
+def active_model() -> str | None:
+    prov = active_provider()
+    return settings.gemini_model if prov == "gemini" else settings.claude_model if prov == "anthropic" else None
+
+
+def _classify_anthropic(photo: bytes | None, text: str | None) -> Classification:
+    import anthropic
+
     content: list[dict] = []
     if photo:
         content.append({"type": "image", "source": {"type": "base64", "media_type": _media_type(photo),
                                                     "data": base64.b64encode(photo).decode()}})
     content.append({"type": "text", "text": f"Citizen message: {text or '(no text)'}"})
-    try:
-        import anthropic
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, timeout=30)
+    resp = client.messages.create(
+        model=settings.claude_model, max_tokens=500, system=SYSTEM, tools=[TOOL],
+        tool_choice={"type": "tool", "name": "submit_triage"}, messages=[{"role": "user", "content": content}],
+    )
+    block = next(b for b in resp.content if b.type == "tool_use")
+    return Classification(**block.input)
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key, timeout=30)
-        resp = client.messages.create(
-            model=settings.claude_model, max_tokens=500, system=SYSTEM, tools=[TOOL],
-            tool_choice={"type": "tool", "name": "submit_triage"}, messages=[{"role": "user", "content": content}],
-        )
-        block = next(b for b in resp.content if b.type == "tool_use")
-        return Classification(**block.input)
-    except Exception as e:  # API down, bad output, timeout...
+
+def _classify_gemini(photo: bytes | None, text: str | None) -> Classification:
+    import httpx
+
+    parts: list[dict] = []
+    if photo:
+        parts.append({"inline_data": {"mime_type": _media_type(photo), "data": base64.b64encode(photo).decode()}})
+    parts.append({"text": f"Citizen message: {text or '(no text)'}"})
+    body = {
+        "systemInstruction": {"parts": [{"text": SYSTEM}]},
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": TOOL["input_schema"],
+            "maxOutputTokens": 1024,
+            "temperature": 0.2,
+        },
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent"
+    res = httpx.post(url, json=body, headers={"x-goog-api-key": settings.gemini_api_key}, timeout=30)
+    res.raise_for_status()
+    raw = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+    return Classification(**json.loads(raw))
+
+
+def classify(photo: bytes | None, text: str | None) -> Classification:
+    provider = active_provider()
+    if not provider:
+        return fallback(text, "AI not configured")
+    if not kv.daily_counter_ok("ai_calls", settings.ai_daily_call_cap):
+        return fallback(text, "daily AI cap reached")
+    try:
+        return _classify_gemini(photo, text) if provider == "gemini" else _classify_anthropic(photo, text)
+    except Exception as e:  # API down, quota hit, bad output, timeout...
         log.exception("classification failed")
         return fallback(text, f"AI error: {type(e).__name__}")

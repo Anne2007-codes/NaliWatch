@@ -73,7 +73,7 @@ def create_report(db, user: User, *, lat: float, lng: float, text: str | None = 
     review = cls.confidence < settings.ai_confidence_threshold
     report = Report(
         reporter_id=user.id, type=cls.type, severity=cls.severity, confidence=cls.confidence, ai_reason=cls.reason,
-        ai_model=None if cls.fallback else settings.claude_model, summary=cls.summary, text=text, transcript=transcript,
+        ai_model=None if cls.fallback else classifier.active_model(), summary=cls.summary, text=text, transcript=transcript,
         photo_key=photo_key, location=point(lat, lng), ward=ward, source=source,
         status="duplicate" if dup else ("needs_review" if review else "triaged"),
         tank_id=tank.id if tank else None, duplicate_of_id=dup.id if dup else None,
