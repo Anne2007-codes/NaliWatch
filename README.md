@@ -2,7 +2,7 @@
 
 A web platform that tracks every load of septic waste from the household to an authorized treatment plant, and uses citizen reports and health signals to decide which tanks to empty first.
 
-> **Status:** Planning / hackathon demo. See the [roadmap](#roadmap).
+
 
 ---
 
