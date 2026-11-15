@@ -43,7 +43,6 @@ const inC=o=>clusters.some(c=>Math.hypot(o.x-c.x,o.y-c.y)<c.r);
 const score=(o,r)=>r?o.sev*20+o.age*2+(o.type=="manual"?100:0)+(inC(o)?15:0):(o.due<0?50+Math.min(-o.due,30):Math.max(0,30-o.due))+(inC(o)?15:0);
 const dueTxt=d=>d<0?`Overdue ${-d} days`:d==0?"Due today":`Due in ${d} days`;
 const dueCls=d=>d<0?"t-r":d<30?"t-y":"t-g";
-// first version of the estimator: capacity x fill limit / (occupants x sludge per person per day); constants are placeholders
 const est=(cap,occ)=>Math.round(cap*0.7/(Math.max(occ,1)*0.15));
 const typeName={overflow:"Overflow",dumping:"Dumping",manual:"Manual cleaning"};
 const ops=[{n:"GreenFlow Desludgers",c:"HR-DS-0412",v:"2027-03-31",s:"Valid"},{n:"Clean Tank Services",c:"HR-DS-0188",v:"2026-12-05",s:"Expiring"},{n:"Jal Seva Co.",c:"HR-DS-0097",v:"2026-09-30",s:"Expired"}];
@@ -51,7 +50,6 @@ const plants=[{n:"Hisar STP 1",a:"HSP-2210",g:"150 m geofence",v:"2028-01-01"}];
 const drivers=["Ramesh","Sunil","Imran"],vehs=[["HR-20-1123",4000],["HR-20-4410",6000]];
 let tol=5,dv="Ramesh",fs=null;
 const audit=[["09:12","Admin added plant Hisar STP 1"],["09:05","Officer decided on F-3: Cleared: GPS fault"],["08:50","TR-291 verified at plant"]];
-// Seeded trips: verified, flagged (open), flagged (closed), one waiting at the plant gate, one planned for the driver app
 const trips=[
 {id:"TR-285",driver:"Sunil",veh:"HR-20-4410",stops:[{k:"T-103",vol:1500,d:1}],st:"verified",recv:1480,gap:0},
 {id:"TR-286",driver:"Imran",veh:"HR-20-1123",stops:[{k:"T-120",vol:1100,d:1}],st:"flagged",recv:1090,gap:11},
@@ -64,11 +62,47 @@ const flags=[
 {id:"F-1",trip:"TR-290",why:"Plant skipped: no plant confirmation and a 14 min GPS gap",st:"open"},
 {id:"F-2",trip:"TR-288",why:"Volume mismatch: 2900 L pumped, 2450 L received (15.5%)",st:"open"},
 {id:"F-3",trip:"TR-286",why:"GPS gap of 11 min near the highway, volume matched",st:"closed",dec:"Cleared: GPS fault"}];
-// tanks already used by seeded trips are not open jobs
 trips.forEach(tr=>tr.stops.forEach(s=>{const o=tanks.find(x=>x.id==s.k);if(o)o.job="trip"}));
 const aud=a=>audit.unshift([new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),a]);
 const pumped=tr=>tr.stops.reduce((a,s)=>a+s.vol,0);
 const stTag=s=>`<span class="tag ${s=="verified"?"t-g":s=="flagged"?"t-r":"t-y"}">${s}</span>`;
 const pend=()=>tanks.filter(x=>(x.due<=5||x.booked)&&!x.job);
-// map coordinates: the ward sits around Hisar; ll2() turns the x/y sketch coordinates into [lng,lat]
 const ll2=(x,y)=>[75.703+x/600*0.034,29.1665-y/400*0.022];
+const MOCK={tanks:tanks.slice(),reports:reports.slice(),clusters:clusters.slice(),health:health.slice(),trips:trips.slice(),flags:flags.slice()};
+function daysUntil(iso){if(!iso)return 90;return Math.round((new Date(iso+"T00:00:00")-new Date())/86400000)}
+function setMapOrigin(lat,lng){window.NW_O={lat,lng}}
+function xy(lat,lng){const o=window.NW_O||{lat:18.5204,lng:73.8567};return{x:Math.max(24,Math.min(576,300+(lng-o.lng)*9000)),y:Math.max(24,Math.min(376,200-(lat-o.lat)*11000))}}
+function fill(arr,rows){arr.length=0;rows.forEach(r=>arr.push(r))}
+function mapType(t){return t==="manual_cleaning"?"manual":(t||"overflow")}
+function hydrateFromApi(payload){
+  const pts=[];
+  (payload.tanks||[]).forEach(t=>{if(t.lat!=null)pts.push([t.lat,t.lng])});
+  (payload.reports||[]).forEach(r=>{if(r.lat!=null)pts.push([r.lat,r.lng])});
+  if(pts.length){const lat=pts.reduce((a,p)=>a+p[0],0)/pts.length,lng=pts.reduce((a,p)=>a+p[1],0)/pts.length;setMapOrigin(lat,lng)}
+  if(payload.tanks) fill(tanks,(payload.tanks||[]).map(t=>{const p=xy(t.lat,t.lng);return{id:"T-"+t.id,rawId:t.id,own:me&&t.property_id?1:0,addr:t.address||"",x:p.x,y:p.y,cap:t.capacity_litres,occ:t.household_size||4,due:daysUntil(t.predicted_due),last:t.last_emptied||"",lat:t.lat,lng:t.lng}}));
+  if(me&&me.role==="household") tanks.forEach(t=>t.own=1);
+  if(payload.reports) fill(reports,(payload.reports||[]).map(r=>{const p=xy(r.lat,r.lng),t=mapType(r.type);return{id:"R-"+r.id,rawId:r.id,type:t,sev:r.severity||1,conf:r.confidence||0,x:p.x,y:p.y,age:r.created_at?Math.max(0,Math.round((Date.now()-new Date(r.created_at))/86400000)):0,why:r.summary||r.text||r.ai_reason||"",lat:r.lat,lng:r.lng}}));
+  if(payload.health) fill(health,(payload.health||[]).map(h=>{const p=xy(h.lat,h.lng);return{area:h.ward||"Area",x:p.x,y:p.y,n:h.case_count,sym:(h.symptoms||[]).join(", ")||"—"}}));
+  if(payload.trips) fill(trips,(payload.trips||[]).map(tr=>({id:"TR-"+tr.id,rawId:tr.id,driver:(tr.driver&&tr.driver.name)||"—",veh:(tr.vehicle&&tr.vehicle.plate)||"",stops:(tr.stops||[]).map(s=>({k:s.job_id?"T-"+s.job_id:s.address,id:s.id,vol:s.volume_pumped_litres||s.estimated_litres||0,d:s.confirmed?1:0})),st:tr.status==="closed_reviewed"?"flagged":tr.status,recv:null,gap:0})));
+  if(payload.flags) fill(flags,(payload.flags||[]).map(f=>({id:"F-"+f.id,rawId:f.id,trip:f.trip_id?"TR-"+f.trip_id:"",why:(f.reason||"")+(f.detail?": "+(typeof f.detail==="string"?f.detail:JSON.stringify(f.detail)):""),st:f.status==="open"||f.status==="needs_info"?"open":"closed",dec:f.decision||f.review_note||""})));
+  if(payload.clusters) fill(clusters,(payload.clusters||[]).map(c=>{const p=xy(c.lat,c.lng);return{id:c.id,x:p.x,y:p.y,r:Math.max(40,Math.min(90,(c.radius_m||150)/3)),score:Math.round(c.score||0),note:c.status+" · "+(c.reports||0)+" reports"}}));
+}
+async function loadLive(){
+  if(!token){nwLive=false;return}
+  const settled=async(p,fb)=>{try{return await p}catch(e){return fb}};
+  const [tk,rp,jb,tr,fl,hs,layers]=await Promise.all([
+    settled(api.get("/tanks"),null),
+    settled(api.get("/reports"),null),
+    settled(api.get("/jobs"),null),
+    settled(api.get("/trips"),null),
+    settled(api.get("/flags"),null),
+    settled(api.get("/health-signals"),null),
+    settled(api.get("/map/layers"),null)
+  ]);
+  const ok=tk||rp||tr||layers;
+  if(!ok){nwLive=false;return}
+  const clustersIn=layers&&layers.clusters?layers.clusters.features.map(f=>{const g=f.geometry||{},c=(g.coordinates||[null,null]);return{id:f.properties.id,lng:c[0],lat:c[1],radius_m:f.properties.radius_m,score:f.properties.score,status:f.properties.status,reports:f.properties.reports}}):null;
+  hydrateFromApi({tanks:tk,reports:rp,trips:tr,flags:fl,health:hs,clusters:clustersIn});
+  if(jb&&tanks.length){jb.forEach(j=>{const o=tanks.find(x=>x.rawId===j.tank_id);if(o){o.booked=j.status+" · job "+j.id;if(j.status!=="pending")o.job="trip"}})}
+  nwLive=true;
+}

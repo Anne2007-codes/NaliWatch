@@ -17,12 +17,13 @@ return `<h2>${r.id} received</h2>${aiCard(r)}${r.type=="manual"?`<p class="emg">
 function rpT(k){rp.type=k;if(rp.sample)rp.photo=samplePhoto(k);draw()}
 function rpS(){rp.photo=samplePhoto(rp.type);rp.sample=1;draw()}
 function rpX(){rp.photo=null;rp.sample=0;draw()}
-function rpF(f){if(!f)return;const fr=new FileReader();fr.onload=()=>{rp.photo=fr.result;rp.sample=0;draw()};fr.readAsDataURL(f)}
+function rpF(f){if(!f)return;rp.file=f;const fr=new FileReader();fr.onload=()=>{rp.photo=fr.result;rp.sample=0;draw()};fr.readAsDataURL(f)}
 function vn(){if(rp.voice==1){rp.voice=2}else rp.voice=1;draw()}
 function seeOnMap(id){go("officer");setTimeout(()=>{sel=id;draw();if(window.mapFocus)mapFocus(id)},90)}
 function sendR(){if(rp.stage>=0)return;if(!rp.photo&&rp.voice!=2&&!rp.note.trim())return say("Add a photo, a voice note or a few words first");
 rp.stage=0;rp.result=null;draw();const iv=setInterval(()=>{rp.stage++;if(rp.stage>=AISTEPS.length){clearInterval(iv);finishR()}else draw()},620)}
-function finishR(){const l=rp.loc,p=areas[l]||[105+Math.random()*50,105+Math.random()*50],x=p[0]+(areas[l]?0:0),ex={};
+async function finishR(){const l=rp.loc,p=areas[l]||[105+Math.random()*50,105+Math.random()*50],x=p[0]+(areas[l]?0:0),ex={};
 if(rp.photo)ex.img=rp.photo;if(rp.voice==2){ex.vh=VOICE.hi;ex.ve=VOICE.en}
+if(token){try{const ll=ll2(p[0],p[1]),fd=new FormData();fd.append("lat",String(ll[1]));fd.append("lng",String(ll[0]));if(rp.note)fd.append("text",rp.note);fd.append("claimed_type",rp.type==="manual"?"manual_cleaning":rp.type);if(rp.file)fd.append("photo",rp.file,rp.file.name||"photo.jpg");const r=await api.postForm("/reports",fd);const mapped=mapType(r.type);rp.result={id:"R-"+r.id,rawId:r.id,type:mapped,sev:r.severity,conf:r.confidence,why:r.summary||r.ai_reason||"",x,y:p[1],...ex};if(mapped==="manual")rp.result.emg=1;rp.stage=-1;await loadLive();draw();return}catch(e){rp.stage=-1;draw();return say(e.message||"Could not submit report")}}
 rp.result=addReport(rp.type,x,p[1],!!rp.photo,ex);rp.stage=-1;aud(rp.result.id+" reported and scored by AI");
 if(rp.type=="manual")rp.result.emg=1;draw()}

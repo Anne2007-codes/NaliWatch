@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://naliwatch:naliwatch@localhost:5432/naliwatch"
     redis_url: str = "redis://localhost:6379/0"
     auto_create_tables: bool = True
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
 
     # auth
     jwt_secret: str = "change-me"

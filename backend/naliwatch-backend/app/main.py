@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import init_db
@@ -26,3 +28,8 @@ for r in (auth, tanks, reports, health, jobs, trips, plant, flags, admin, map, m
 @app.get("/healthz", tags=["meta"])
 def healthz():
     return {"ok": True}
+
+
+_frontend = Path(__file__).resolve().parents[3] / "frontend"
+if _frontend.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend), html=True), name="frontend")
